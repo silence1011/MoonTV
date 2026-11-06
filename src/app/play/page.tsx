@@ -140,6 +140,31 @@ function PlayPageClient() {
   // 视频播放地址
   const [videoUrl, setVideoUrl] = useState('');
 
+  // 视频代理开关（从 localStorage 继承，默认开：先试代理模式）
+  // 代理走自家 InstaBox 视频代理 play.yvioo.dpdns.org，播放地址拼成
+  // https://play.yvioo.dpdns.org/<原始m3u8地址>，m3u8、分片、密钥全走代理；
+  // 关掉就是直连上游 CDN。注意本 fork 原来没有视频代理开关，默认就是直连。
+  const VIDEO_PROXY_ORIGIN = 'https://play.yvioo.dpdns.org';
+  const [videoProxyEnabled, setVideoProxyEnabled] = useState<boolean>(() => {
+    if (typeof window !== 'undefined') {
+      const v = localStorage.getItem('enable_video_proxy');
+      if (v !== null) return v === 'true';
+    }
+    return true;
+  });
+  const videoProxyEnabledRef = useRef(videoProxyEnabled);
+  useEffect(() => {
+    videoProxyEnabledRef.current = videoProxyEnabled;
+  }, [videoProxyEnabled]);
+
+  // 按开关给播放地址加/去代理前缀
+  const applyVideoProxy = (url: string) => {
+    if (!url || !/^https?:\/\//i.test(url)) return url;
+    if (url.startsWith(VIDEO_PROXY_ORIGIN)) return url;
+    if (!videoProxyEnabledRef.current) return url;
+    return `${VIDEO_PROXY_ORIGIN}/${url}`;
+  };
+
   // 总集数
   const totalEpisodes = detail?.episodes?.length || 0;
 
@@ -410,7 +435,7 @@ function PlayPageClient() {
       setVideoUrl('');
       return;
     }
-    const newUrl = detailData?.episodes[episodeIndex] || '';
+    const newUrl = applyVideoProxy(detailData?.episodes[episodeIndex] || '');
     if (newUrl !== videoUrl) {
       setVideoUrl(newUrl);
     }
@@ -1366,6 +1391,43 @@ function PlayPageClient() {
             },
           },
           {
+            name: '视频代理',
+            html: '视频代理',
+            tooltip: videoProxyEnabled
+              ? '已开启：走 play.yvioo.dpdns.org'
+              : '已关闭：直连上游',
+            switch: videoProxyEnabled,
+            onSwitch: function (item) {
+              const newVal = !item.switch;
+              try {
+                localStorage.setItem('enable_video_proxy', String(newVal));
+                if (artPlayerRef.current) {
+                  resumeTimeRef.current =
+                    artPlayerRef.current.currentTime || 0;
+                  if (
+                    artPlayerRef.current.video &&
+                    artPlayerRef.current.video.hls
+                  ) {
+                    artPlayerRef.current.video.hls.destroy();
+                  }
+                  artPlayerRef.current.destroy();
+                  artPlayerRef.current = null;
+                }
+                // 先同步 ref 再重算地址，否则 applyVideoProxy 读到的还是旧开关值
+                videoProxyEnabledRef.current = newVal;
+                const ep =
+                  detailRef.current?.episodes?.[
+                    currentEpisodeIndexRef.current
+                  ] || '';
+                if (ep) setVideoUrl(applyVideoProxy(ep));
+                setVideoProxyEnabled(newVal);
+              } catch (_) {
+                // ignore
+              }
+              return newVal;
+            },
+          },
+          {
             html: '删除跳过配置',
             onClick: function () {
               handleSkipConfigChange({
@@ -1577,7 +1639,7 @@ function PlayPageClient() {
       console.error('创建播放器失败:', err);
       setError('播放器初始化失败');
     }
-  }, [Artplayer, Hls, videoUrl, loading, blockAdEnabled]);
+  }, [Artplayer, Hls, videoUrl, loading, blockAdEnabled, videoProxyEnabled]);
 
   // 当组件卸载时清理定时器
   useEffect(() => {
