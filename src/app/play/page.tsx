@@ -1273,12 +1273,20 @@ function PlayPageClient() {
             const hls = new Hls({
               debug: false, // 关闭日志
               enableWorker: true, // WebWorker 解码，降低主线程压力
-              lowLatencyMode: true, // 开启低延迟 LL-HLS
+              // 点播不是直播：关掉低延迟，低延迟会压缓冲、网一抖就卡
+              lowLatencyMode: false,
 
-              /* 缓冲/内存相关 */
-              maxBufferLength: 30, // 前向缓冲最大 30s，过大容易导致高延迟
-              backBufferLength: 30, // 仅保留 30s 已播放内容，避免内存占用
-              maxBufferSize: 60 * 1000 * 1000, // 约 60MB，超出后触发清理
+              /* 缓冲/内存相关：点播求稳不求低延迟，缓冲加大抗抖动 */
+              maxBufferLength: 120, // 前向缓冲 30s -> 120s
+              maxMaxBufferLength: 300, // 前向缓冲上限 300s
+              backBufferLength: 60, // 仅保留 60s 已播放内容，方便回看又不占太多内存
+              maxBufferSize: 120 * 1000 * 1000, // 约 120MB，超出后触发清理
+
+              /* 慢源容忍：单分片/清单超时放宽，多重试一次再放弃 */
+              fragLoadingTimeOut: 60000,
+              manifestLoadingTimeOut: 20000,
+              fragLoadingMaxRetry: 4,
+              manifestLoadingMaxRetry: 2,
 
               /* 自定义loader */
               loader: blockAdEnabledRef.current
